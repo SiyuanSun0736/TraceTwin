@@ -1,12 +1,12 @@
-# Siamese-MicroPerf 模型架构详解
+# TraceTwin 模型架构详解
 
-![Siamese-MicroPerf 系统架构图](diagrams/model-architecture.svg)
+![TraceTwin 系统架构图](diagrams/model-architecture.svg)
 
 另外保留了一份 Mermaid 草图，见 [model-architecture.mmd](diagrams/model-architecture.mmd)。
 
 ## 总体视角
 
-Siamese-MicroPerf 的核心任务不是单独判断一个版本“快不快”，而是判断同一个程序的两个版本之间谁更快、快多少。因此它不是一个普通的单塔时序回归器，而是一个显式面向“成对比较”的 Siamese 架构。
+TraceTwin 的核心任务不是单独判断一个版本“快不快”，而是判断同一个程序的两个版本之间谁更快、快多少。因此它不是一个普通的单塔时序回归器，而是一个显式面向“成对比较”的 Siamese 架构。
 
 整体前向链路可以写成：
 
@@ -105,7 +105,7 @@ $$
 
 ## 核心设计：为什么要用 [V_{v1}; V_{v2}; V_{v1} - V_{v2}]
 
-这是整个 Siamese-MicroPerf 架构里最关键的设计之一。
+这是整个 TraceTwin 架构里最关键的设计之一。
 
 设池化后得到两个版本表示：
 
@@ -262,7 +262,7 @@ $$
 [V_{v1}; V_{v2}; V_{v1} - V_{v2}]
 $$
 
-它确保模型既能看到两个版本各自的绝对状态，又能直接读取它们的方向性差异。这正是 Siamese-MicroPerf 能把“时序行为建模”变成“相对性能预测”的关键。
+它确保模型既能看到两个版本各自的绝对状态，又能直接读取它们的方向性差异。这正是 TraceTwin 能把“时序行为建模”变成“相对性能预测”的关键。
 
 ## 相关资料
 

@@ -1,6 +1,6 @@
 # Data Collection & Feature Engineering
 
-本文补充说明 Siamese-MicroPerf 的两段关键流水线：
+本文补充说明 TraceTwin 的两段关键流水线：
 
 1. 轻量级 C 侧采集器 pmu_monitor 如何在固定采样周期内输出对齐的 PMU/LBR 时序。
 2. Python 侧如何把原始 CSV 转成可直接送入 Siamese 模型的 6 维时序特征。
@@ -123,7 +123,7 @@ eBPF
   -> 在内核态执行过滤、聚合、关联分析
 ```
 
-对本文而言，最重要的结论是：Siamese-MicroPerf 当前选择的是“自定义用户态程序 + perf_event API”这条链，而不是“perf 命令行工具驱动”或“eBPF 内核分析程序驱动”这两条链。
+对本文而言，最重要的结论是：TraceTwin 当前选择的是“自定义用户态程序 + perf_event API”这条链，而不是“perf 命令行工具驱动”或“eBPF 内核分析程序驱动”这两条链。
 
 ### 2.4 采样方式
 
@@ -427,7 +427,7 @@ pmu_monitor
   -> 输出 X_v1.pt / X_v2.pt / Y.pt / len_*.pt / stats.json
 ```
 
-这也是 Siamese-MicroPerf 的核心设计点：
+这也是 TraceTwin 的核心设计点：
 
 - C 侧只做轻量采样和必要统计压缩。
 - Python 侧完成尺度统一、序列对齐和标准化。

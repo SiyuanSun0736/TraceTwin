@@ -37,9 +37,9 @@
      inkscape:window-maximized="0"
      inkscape:current-layer="g82" />
   <title
-     id="title">Siamese-MicroPerf architecture</title>
+     id="title">TraceTwin architecture</title>
   <desc
-     id="desc">Basic architecture diagram for Siamese-MicroPerf showing paired inputs, a shared encoder with CNN, BiLSTM, or Transformer backbones, mask-aware pooling, explicit contrast fusion, an MLP head, and the final ratio prediction.</desc>
+     id="desc">Basic architecture diagram for TraceTwin showing paired inputs, a shared encoder with CNN, BiLSTM, or Transformer backbones, mask-aware pooling, explicit contrast fusion, an MLP head, and the final ratio prediction.</desc>
   <g
      font-family="DejaVu Sans, Arial, sans-serif"
      fill="#0f172a"
@@ -49,8 +49,8 @@
        y="54"
        font-size="34"
        font-weight="700"
-       text-anchor="middle"
-       id="text1">Siamese-MicroPerf Architecture</text>
+      text-anchor="middle"
+      id="text1">TraceTwin Architecture</text>
     <text
        x="800"
        y="88"

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
   <title id="title">perf CLI, perf_event API and eBPF layering</title>
-  <desc id="desc">A layered diagram showing user-space tools, the Linux perf_event subsystem and optional eBPF programs, and the underlying hardware and kernel event sources used by Siamese-MicroPerf.</desc>
+  <desc id="desc">A layered diagram showing user-space tools, the Linux perf_event subsystem and optional eBPF programs, and the underlying hardware and kernel event sources used by TraceTwin.</desc>
   <defs>
     <style>
       .bg { fill: #f6f2e8; }
@@ -25,7 +25,7 @@
   </defs>
 
   <rect class="bg" x="0" y="0" width="1200" height="760" />
-  <text class="title" x="60" y="55">Siamese-MicroPerf data collection stack</text>
+  <text class="title" x="60" y="55">TraceTwin data collection stack</text>
   <text class="subtitle" x="60" y="83">Where perf CLI, perf_event API and eBPF sit relative to pmu_monitor, PMU counters and LBR</text>
 
   <rect class="panel-user" x="50" y="115" width="1100" height="150" />
