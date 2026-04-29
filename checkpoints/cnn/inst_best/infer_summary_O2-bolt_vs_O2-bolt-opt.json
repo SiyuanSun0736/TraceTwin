@@ -1,0 +1,29 @@
+{
+  "pair_label": "O2-bolt_vs_O2-bolt-opt",
+  "v1": "O2-bolt",
+  "v2": "O2-bolt-opt",
+  "mechanism": "inst_retired_ratio",
+  "label_semantics": "Y = Σinst_v1 / Σinst_v2 (retired instruction ratio)",
+  "direction_rule": "(pred >= 1.0 and true >= 1.0) or (pred < 1.0 and true < 1.0)",
+  "display_rule": "judge() uses ±5% tie band for human-readable verdicts",
+  "num_samples": 174,
+  "sample_csv": "infer_samples_O2-bolt_vs_O2-bolt-opt.csv",
+  "metrics": {
+    "mae": 0.02466321094282742,
+    "mse": 0.0015451890990227312,
+    "rmse": 0.03930889338333923,
+    "direction_accuracy": {
+      "correct": 111,
+      "total": 174,
+      "percent": 63.793103448275865
+    },
+    "pred_v1_better": 75,
+    "true_v1_better": 92,
+    "direction_accuracy_filtered": {
+      "correct": 15,
+      "total": 17,
+      "percent": 88.23529411764706,
+      "true_margin_threshold": 0.05
+    }
+  }
+}

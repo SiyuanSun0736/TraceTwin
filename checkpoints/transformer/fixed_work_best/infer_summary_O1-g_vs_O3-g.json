@@ -1,0 +1,29 @@
+{
+  "pair_label": "O1-g_vs_O3-g",
+  "v1": "O1-g",
+  "v2": "O3-g",
+  "mechanism": "fixed_workload",
+  "label_semantics": "Y = T_v2 / T_v1 (time ratio)",
+  "direction_rule": "(pred >= 1.0 and true >= 1.0) or (pred < 1.0 and true < 1.0)",
+  "display_rule": "judge() uses ±5% tie band for human-readable verdicts",
+  "num_samples": 163,
+  "sample_csv": "infer_samples_O1-g_vs_O3-g.csv",
+  "metrics": {
+    "mae": 0.020805928970407124,
+    "mse": 0.0007202708750738075,
+    "rmse": 0.026837862714340865,
+    "direction_accuracy": {
+      "correct": 141,
+      "total": 163,
+      "percent": 86.50306748466258
+    },
+    "pred_v1_better": 69,
+    "true_v1_better": 59,
+    "direction_accuracy_filtered": {
+      "correct": 73,
+      "total": 73,
+      "percent": 100.0,
+      "true_margin_threshold": 0.05
+    }
+  }
+}

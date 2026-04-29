@@ -17,35 +17,43 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKPOINTS_DIR = ROOT / "checkpoints"
 OUTPUT_DIR = ROOT / "docs" / "diagrams"
 
+
+def latest_infer_log(relative_dir: str) -> Path:
+    run_dir = CHECKPOINTS_DIR / relative_dir
+    candidates = sorted(list(run_dir.glob("infer_*.log")) + list(run_dir.glob("infer_*.txt")))
+    if not candidates:
+        raise FileNotFoundError(f"No infer logs found in {run_dir}")
+    return Path(relative_dir) / candidates[-1].name
+
 PAIR_NAMES = ["O1-g", "O2-bolt", "O3-bolt"]
 BEST_RUNS = [
-    ("CNN", "fixed_time", Path("cnn/fixed_time_best/infer_20260330_213616.log")),
-    ("CNN", "fixed_work", Path("cnn/fixed_work_best/infer_20260330_211323.log")),
-    ("CNN", "inst", Path("cnn/inst_best/infer_20260330_230630.log")),
-    ("LSTM", "fixed_time", Path("lstm/fixed_time_best/infer_20260331_142207.log")),
-    ("LSTM", "fixed_work", Path("lstm/fixed_work_best/infer_20260331_145944.log")),
-    ("LSTM", "inst", Path("lstm/inst_best/infer_20260331_162147.log")),
-    ("Transformer", "fixed_time", Path("transformer/fixed_time_best/infer_20260331_202350.log")),
-    ("Transformer", "fixed_work", Path("transformer/fixed_work_best/infer_20260330_154532.log")),
-    ("Transformer", "inst", Path("transformer/inst_best/infer_20260331_174437.log")),
+    ("CNN", "fixed_time", latest_infer_log("cnn/fixed_time_best")),
+    ("CNN", "fixed_work", latest_infer_log("cnn/fixed_work_best")),
+    ("CNN", "inst", latest_infer_log("cnn/inst_best")),
+    ("LSTM", "fixed_time", latest_infer_log("lstm/fixed_time_best")),
+    ("LSTM", "fixed_work", latest_infer_log("lstm/fixed_work_best")),
+    ("LSTM", "inst", latest_infer_log("lstm/inst_best")),
+    ("Transformer", "fixed_time", latest_infer_log("transformer/fixed_time_best")),
+    ("Transformer", "fixed_work", latest_infer_log("transformer/fixed_work_best")),
+    ("Transformer", "inst", latest_infer_log("transformer/inst_best")),
 ]
 TRANSFORMER_VARIANTS = {
     "fixed_time": [
         ("v1", Path("transformer/fixed_timev1/infer_20260331_193632.log")),
         ("v2", Path("transformer/fixed_timev2/infer_20260331_201750.log")),
         ("v3", Path("transformer/fixed_timev3/infer_v3.txt")),
-        ("best", Path("transformer/fixed_time_best/infer_20260331_202350.log")),
+        ("best", latest_infer_log("transformer/fixed_time_best")),
     ],
     "fixed_work": [
         ("v2", Path("transformer/fixed_workv2/infer_v2.log")),
         ("v3", Path("transformer/fixed_workv3/infer_v3.log")),
-        ("best", Path("transformer/fixed_work_best/infer_20260330_154532.log")),
+        ("best", latest_infer_log("transformer/fixed_work_best")),
     ],
     "inst": [
         ("v1", Path("transformer/inst_retiredv1/infer_20260330_192629.txt")),
         ("v2", Path("transformer/inst_retiredv2/infer_20260331_172047.log")),
         ("v3", Path("transformer/inst_retiredv3/infer_20260331_174437.log")),
-        ("best", Path("transformer/inst_best/infer_20260331_174437.log")),
+        ("best", latest_infer_log("transformer/inst_best")),
     ],
 }
 MODEL_COLORS = {

@@ -1,0 +1,29 @@
+{
+  "pair_label": "O1-g_vs_O3-g",
+  "v1": "O1-g",
+  "v2": "O3-g",
+  "mechanism": "fixed_time",
+  "label_semantics": "Y = N_v1 / N_v2 (throughput ratio in a fixed window)",
+  "direction_rule": "(pred >= 1.0 and true >= 1.0) or (pred < 1.0 and true < 1.0)",
+  "display_rule": "judge() uses ±5% tie band for human-readable verdicts",
+  "num_samples": 163,
+  "sample_csv": "infer_samples_O1-g_vs_O3-g.csv",
+  "metrics": {
+    "mae": 0.10700784285375677,
+    "mse": 0.03617149026548747,
+    "rmse": 0.19018803922825292,
+    "direction_accuracy": {
+      "correct": 112,
+      "total": 163,
+      "percent": 68.71165644171779
+    },
+    "pred_v1_better": 64,
+    "true_v1_better": 59,
+    "direction_accuracy_filtered": {
+      "correct": 61,
+      "total": 73,
+      "percent": 83.56164383561644,
+      "true_margin_threshold": 0.05
+    }
+  }
+}

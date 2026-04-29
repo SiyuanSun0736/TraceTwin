@@ -63,6 +63,7 @@ infer.py — 推理与验证阶段 (Inference / Validation)
 """
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
@@ -134,6 +135,129 @@ def resolve_label_mode(stats: dict | None) -> tuple[str, str]:
     return mechanism, stats.get("label_semantics", default_semantics)
 
 
+def same_side_of_boundary(pred: float, true: float) -> bool:
+    """方向统计口径：与 infer 日志 summary 保持一致。"""
+    return (pred >= 1.0 and true >= 1.0) or (pred < 1.0 and true < 1.0)
+
+
+def export_pair_results(output_dir: Path, pair_label: str,
+                        Y_hat, Y, programs,
+                        v1_name: str, v2_name: str,
+                        mechanism: str, label_semantics: str):
+    """导出逐样本高精度 CSV 与摘要 JSON，便于后续脚本无损重算。"""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / f"infer_samples_{pair_label}.csv"
+    summary_path = output_dir / f"infer_summary_{pair_label}.json"
+
+    N = Y_hat.shape[0]
+    has_label = Y is not None
+    rows: list[dict[str, object]] = []
+    pred_vals: list[float] = []
+    true_vals: list[float] = []
+    correct_direction = 0
+
+    for i in range(N):
+        y_hat = float(Y_hat[i].item())
+        prog = programs[i] if programs else f"sample_{i}"
+        row: dict[str, object] = {
+            "index": i + 1,
+            "program": prog,
+            "pred_y_hat": y_hat,
+            "pred_side": "v1" if y_hat >= 1.0 else "v2",
+            "verdict": judge(y_hat, v1_name, v2_name),
+        }
+        pred_vals.append(y_hat)
+
+        if has_label:
+            y_true = float(Y[i].item())
+            err = y_hat - y_true
+            is_correct = same_side_of_boundary(y_hat, y_true)
+            row.update(
+                {
+                    "true_y": y_true,
+                    "error": err,
+                    "true_side": "v1" if y_true >= 1.0 else "v2",
+                    "direction_correct": is_correct,
+                }
+            )
+            true_vals.append(y_true)
+            if is_correct:
+                correct_direction += 1
+
+        rows.append(row)
+
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        fieldnames = [
+            "index",
+            "program",
+            "pred_y_hat",
+            "pred_side",
+            "true_y",
+            "true_side",
+            "error",
+            "direction_correct",
+            "verdict",
+        ]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+    summary: dict[str, object] = {
+        "pair_label": pair_label,
+        "v1": v1_name,
+        "v2": v2_name,
+        "mechanism": mechanism,
+        "label_semantics": label_semantics,
+        "direction_rule": "(pred >= 1.0 and true >= 1.0) or (pred < 1.0 and true < 1.0)",
+        "display_rule": "judge() uses ±5% tie band for human-readable verdicts",
+        "num_samples": N,
+        "sample_csv": csv_path.name,
+    }
+
+    if has_label and true_vals:
+        pred = np.array(pred_vals, dtype=np.float64)
+        true = np.array(true_vals, dtype=np.float64)
+        mae = float(np.abs(pred - true).mean())
+        mse = float(((pred - true) ** 2).mean())
+        rmse = float(np.sqrt(mse))
+        direction_acc = correct_direction / N * 100.0
+        summary.update(
+            {
+                "metrics": {
+                    "mae": mae,
+                    "mse": mse,
+                    "rmse": rmse,
+                    "direction_accuracy": {
+                        "correct": correct_direction,
+                        "total": N,
+                        "percent": direction_acc,
+                    },
+                    "pred_v1_better": int((pred >= 1.0).sum()),
+                    "true_v1_better": int((true >= 1.0).sum()),
+                }
+            }
+        )
+        mask = np.abs(true - 1.0) > 0.05
+        if int(mask.sum()) > 0:
+            correct_filt = int((
+                ((pred[mask] >= 1.0) & (true[mask] >= 1.0)) |
+                ((pred[mask] < 1.0) & (true[mask] < 1.0))
+            ).sum())
+            summary["metrics"]["direction_accuracy_filtered"] = {
+                "correct": correct_filt,
+                "total": int(mask.sum()),
+                "percent": correct_filt / int(mask.sum()) * 100.0,
+                "true_margin_threshold": 0.05,
+            }
+
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return csv_path, summary_path
+
+
 # ── 张量模式推理 ──────────────────────────────────────────────────────────────
 
 @torch.no_grad()
@@ -189,7 +313,8 @@ def infer_from_tensors(model, tensor_dir: Path, device: torch.device,
 
 
 def print_results(Y_hat, Y, programs, v1_name, v2_name,
-                  mechanism: str, label_semantics: str, pair_label: str):
+                  mechanism: str, label_semantics: str, pair_label: str,
+                  output_dir: Path | None = None):
     """打印推理结果表格。"""
     N = Y_hat.shape[0]
     has_label = Y is not None
@@ -199,12 +324,13 @@ def print_results(Y_hat, Y, programs, v1_name, v2_name,
     logger.info("版本对: %s  (%s vs %s)  共 %d 个程序", pair_label, v1_name, v2_name, N)
     logger.info("标签模式: %s", mechanism)
     logger.info("标签定义: %s", label_semantics)
-    logger.info("判定方向: Y > 1 视为 %s 更快，Y < 1 视为 %s 更快", v1_name, v2_name)
+    logger.info("判定方向: Y >= 1 视为 %s 更快，Y < 1 视为 %s 更快", v1_name, v2_name)
+    logger.info("统计口径: 方向准确率按 same-side(Y=1.0) 统计；展示结论仍使用 judge() 的 ±5%% 区间")
     logger.info("%s", "=" * 72)
 
-    header = f"  {'#':>4}  {'程序':>30}  {'预测 Ŷ':>8}"
+    header = f"  {'#':>4}  {'程序':>30}  {'预测 Ŷ':>12}"
     if has_label:
-        header += f"  {'真实 Y':>8}  {'误差':>8}"
+        header += f"  {'真实 Y':>12}  {'误差':>12}"
     header += f"  {'判断'}"
     logger.info(header)
     logger.info("  %s", '-' * len(header))
@@ -217,14 +343,14 @@ def print_results(Y_hat, Y, programs, v1_name, v2_name,
         prog = programs[i] if programs else f"sample_{i}"
         verdict = judge(y_hat, v1_name, v2_name)
 
-        line = f"  {i+1:>4}  {prog:>30}  {y_hat:>8.4f}"
+        line = f"  {i+1:>4}  {prog:>30}  {y_hat:>12.8f}"
         if has_label:
             y_true = Y[i].item()
             err = y_hat - y_true
-            line += f"  {y_true:>8.4f}  {err:>+8.4f}"
+            line += f"  {y_true:>12.8f}  {err:>+12.8f}"
             all_pred.append(y_hat)
             all_true.append(y_true)
-            if (y_hat >= 1.0 and y_true >= 1.0) or (y_hat < 1.0 and y_true < 1.0):
+            if same_side_of_boundary(y_hat, y_true):
                 correct_direction += 1
         line += f"  {verdict}"
         logger.info(line)
@@ -238,13 +364,13 @@ def print_results(Y_hat, Y, programs, v1_name, v2_name,
         direction_acc = correct_direction / N * 100
 
         logger.info("\n  ── 验证指标 ──")
-        logger.info("  MAE  = %.4f", mae)
-        logger.info("  MSE  = %.4f", mse)
-        logger.info("  RMSE = %.4f", np.sqrt(mse))
+        logger.info("  MAE  = %.6f", mae)
+        logger.info("  MSE  = %.6f", mse)
+        logger.info("  RMSE = %.6f", np.sqrt(mse))
         logger.info("  方向准确率 = %d/%d (%.1f%%)", correct_direction, N, direction_acc)
 
-        v1_better_pred = (pred > 1.0).sum()
-        v1_better_true = (true > 1.0).sum()
+        v1_better_pred = (pred >= 1.0).sum()
+        v1_better_true = (true >= 1.0).sum()
         logger.info("  预测 %s 更优: %d/%d  (真实: %d/%d)", v1_name, v1_better_pred, N, v1_better_true, N)
 
         # 方向准确率（排除 ±5% 区间的样本）——聚焦有显著真实差异的样本
@@ -254,6 +380,14 @@ def print_results(Y_hat, Y, programs, v1_name, v2_name,
                             ((pred[mask] <  1.0) & (true[mask] <  1.0))).sum()
             acc_filt = correct_filt / mask.sum() * 100.0
             logger.info("  方向准确率（排除 ±5%%）= %d/%d (%.1f%%)", int(correct_filt), int(mask.sum()), acc_filt)
+
+    if output_dir is not None:
+        csv_path, summary_path = export_pair_results(
+            output_dir, pair_label, Y_hat, Y, programs,
+            v1_name, v2_name, mechanism, label_semantics,
+        )
+        logger.info("  结构化结果: %s", csv_path)
+        logger.info("  摘要结果: %s", summary_path)
 
 
 # ── CSV 模式推理 ──────────────────────────────────────────────────────────────
@@ -348,6 +482,9 @@ def main():
     parser.add_argument(
         "--stats", type=Path, default=None,
         help="归一化统计量 stats.json 路径（CSV 模式必需）")
+    parser.add_argument(
+        "--output-dir", type=Path, default=None,
+        help="推理日志与结构化结果输出目录（默认 project_root/log）")
 
     # 模型类型（默认 auto：从 JSON 配置或 checkpoint 自动推断）
     parser.add_argument(
@@ -380,8 +517,8 @@ def main():
         print(f"[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
 
-    # 配置日志：写入 project_root/log/infer_YYYYmmdd_HHMMSS.log
-    log_dir = args.project_root / "log"
+    # 配置日志：写入 output_dir/infer_YYYYmmdd_HHMMSS.log
+    log_dir = args.output_dir or (args.project_root / "log")
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"infer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     # 配置根日志：同时写入文件和输出到控制台
@@ -403,6 +540,7 @@ def main():
     logging.getLogger(__name__).info("%s", device_message)
     logging.getLogger(__name__).info("设备: %s", device)
     logging.getLogger(__name__).info("设备类型: %s", resolved_device_name)
+    logging.getLogger(__name__).info("日志输出目录: %s", log_dir)
 
     logger = logging.getLogger(__name__)
 
@@ -520,7 +658,8 @@ def main():
         Y_hat, Y, programs, v1_name, v2_name, mechanism, label_semantics = \
             infer_from_tensors(model, d, device, log_target=log_target)
         print_results(Y_hat, Y, programs, v1_name, v2_name,
-                      mechanism, label_semantics, pair)
+                      mechanism, label_semantics, pair,
+                      output_dir=log_dir)
 
     logging.getLogger(__name__).info("")
 

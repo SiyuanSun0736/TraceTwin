@@ -1,0 +1,7 @@
+2026-04-29 13:52:10,373 INFO: 自动选择设备: directml
+2026-04-29 13:52:10,373 INFO: 设备: privateuseone:0
+2026-04-29 13:52:10,373 INFO: 设备类型: directml
+2026-04-29 13:52:10,373 INFO: 日志输出目录: checkpoints/cnn/fixed_work_best
+2026-04-29 13:52:10,374 INFO: 未找到 JSON 配置文件，尝试从 checkpoint 元数据恢复...
+2026-04-29 13:52:10,385 ERROR: 无法确定模型架构：configs/ 目录下无对应 JSON 配置，checkpoint 中也无 model_name/model_kwargs 元数据。
+请使用 --config 指定配置文件，或使用包含完整元数据的 checkpoint。

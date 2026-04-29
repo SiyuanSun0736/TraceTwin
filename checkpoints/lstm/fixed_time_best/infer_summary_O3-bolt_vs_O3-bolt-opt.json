@@ -1,0 +1,29 @@
+{
+  "pair_label": "O3-bolt_vs_O3-bolt-opt",
+  "v1": "O3-bolt",
+  "v2": "O3-bolt-opt",
+  "mechanism": "fixed_time",
+  "label_semantics": "Y = N_v1 / N_v2 (throughput ratio in a fixed window)",
+  "direction_rule": "(pred >= 1.0 and true >= 1.0) or (pred < 1.0 and true < 1.0)",
+  "display_rule": "judge() uses ±5% tie band for human-readable verdicts",
+  "num_samples": 161,
+  "sample_csv": "infer_samples_O3-bolt_vs_O3-bolt-opt.csv",
+  "metrics": {
+    "mae": 0.03049732994589006,
+    "mse": 0.0077435183472777435,
+    "rmse": 0.08799726329425105,
+    "direction_accuracy": {
+      "correct": 104,
+      "total": 161,
+      "percent": 64.59627329192547
+    },
+    "pred_v1_better": 130,
+    "true_v1_better": 117,
+    "direction_accuracy_filtered": {
+      "correct": 16,
+      "total": 29,
+      "percent": 55.172413793103445,
+      "true_margin_threshold": 0.05
+    }
+  }
+}
