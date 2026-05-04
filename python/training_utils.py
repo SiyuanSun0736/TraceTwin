@@ -80,3 +80,65 @@ def evaluate(model, loader, criterion, device):
     true = torch.cat(all_true)
     mae = (pred - true).abs().mean().item()
     return avg_loss, mae, pred, true
+
+
+def binary_clf_metrics(pred: torch.Tensor, true: torch.Tensor,
+                       threshold: float = 0.0) -> dict:
+    """将回归输出二值化后计算二分类指标：accuracy / precision / recall / F1。
+
+    正类（label=1）：true > threshold（即 v1 比 v2 快）。
+    负类（label=0）：true <= threshold（即 v2 不慢于 v1）。
+
+    threshold 取值：
+        - log 空间（log_target=True）：0.0（对应原始加速比 = 1.0）
+        - 原始空间（log_target=False）：1.0（加速比 > 1 表示 v1 更快）
+    """
+    pred_bin = (pred > threshold).long()
+    true_bin = (true > threshold).long()
+
+    tp = int(((pred_bin == 1) & (true_bin == 1)).sum())
+    fp = int(((pred_bin == 1) & (true_bin == 0)).sum())
+    tn = int(((pred_bin == 0) & (true_bin == 0)).sum())
+    fn = int(((pred_bin == 0) & (true_bin == 1)).sum())
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    f1        = (2 * precision * recall / (precision + recall)
+                 if (precision + recall) > 0 else 0.0)
+    accuracy  = (tp + tn) / (tp + fp + tn + fn) if (tp + fp + tn + fn) > 0 else 0.0
+
+    return {
+        "tp": tp, "fp": fp, "tn": tn, "fn": fn,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "accuracy": accuracy,
+    }
+
+
+@torch.no_grad()
+def evaluate_binary(model, loader, criterion, device):
+    """二分类评估：返回 (loss, f1, logits, true_labels, metrics_dict)。
+
+    模型输出被视为 logit（未经 sigmoid）；正类判定条件为 logit > 0。
+    """
+    model.eval()
+    total_loss = 0.0
+    all_logits, all_true = [], []
+    n = 0
+    for x1, x2, y, lv1, lv2 in loader:
+        x1, x2, y = x1.to(device), x2.to(device), y.to(device)
+        lv1, lv2 = lv1.to(device), lv2.to(device)
+        logits = model(x1, x2, lv1, lv2)
+        loss = criterion(logits, y)
+        total_loss += loss.item() * y.size(0)
+        n += y.size(0)
+        all_logits.append(logits.cpu())
+        all_true.append(y.cpu())
+
+    avg_loss = total_loss / n
+    logits = torch.cat(all_logits)
+    true = torch.cat(all_true)
+    # logit > 0 等价于概率 > 0.5；true 为 0/1 浮点标签，阈值 0.0 时 true>0 即正类
+    metrics = binary_clf_metrics(logits, true, threshold=0.0)
+    return avg_loss, metrics["f1"], logits, true, metrics

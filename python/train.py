@@ -61,7 +61,7 @@ from config_utils import (
 from data_loading import (
     merge_pairs, train_val_test_split, augment_pair_swap,
 )
-from training_utils import train_one_epoch, evaluate
+from training_utils import train_one_epoch, evaluate, evaluate_binary, binary_clf_metrics
 
 
 # ── 主流程 ────────────────────────────────────────────────────────────────────
@@ -141,6 +141,9 @@ def main():
     parser.add_argument(
         "--pair-swap", action="store_true", default=False,
         help="对称增强：添加 (v2,v1) 反转对，数据翻倍")
+    parser.add_argument(
+        "--task", choices=["regression", "binary"], default="regression",
+        help="训练任务：regression（加速比回归）或 binary（方向二分类）")
     parser.add_argument(
         "--model", "--arch", dest="model",
         choices=MODEL_CHOICES, default="cnn",
@@ -303,6 +306,17 @@ def main():
             X_v1_tr, X_v2_tr, Y_tr, lv1_tr, lv2_tr, log_target=args.log_target)
         logging.getLogger(__name__).info("pair-swap 增强后训练集: %d 样本", Y_tr.shape[0])
 
+    # ── 二分类模式：标签二値化 ──
+    if args.task == "binary":
+        _bin_thresh = 0.0 if args.log_target else 1.0
+        pos_ratio = float((Y_tr > _bin_thresh).float().mean())
+        Y_tr   = (Y_tr   > _bin_thresh).float()
+        Y_val  = (Y_val  > _bin_thresh).float()
+        Y_test = (Y_test > _bin_thresh).float()
+        logging.getLogger(__name__).info(
+            "二分类模式：标签已二値化（阈値=%.1f），训练集正类比例 %.1f%%",
+            _bin_thresh, 100.0 * pos_ratio)
+
     logging.getLogger(__name__).info(
         "训练集: %d  验证集: %d  测试集: %d",
         Y_tr.shape[0], Y_val.shape[0], Y_test.shape[0])
@@ -324,8 +338,11 @@ def main():
         "\n模型参数: %s", f"{sum(p.numel() for p in model.parameters()):,}")
     logging.getLogger(__name__).info("%s", model)
 
-    # Huber Loss (§4)
-    criterion = nn.HuberLoss(delta=args.huber_delta)
+    # Huber Loss (§4) 或 Binary Cross-Entropy
+    if args.task == "binary":
+        criterion = nn.BCEWithLogitsLoss()
+    else:
+        criterion = nn.HuberLoss(delta=args.huber_delta)
 
     # 加载检查点：支持将 --checkpoint 指定为目录或文件
     if checkpoint_data is not None:
@@ -333,13 +350,40 @@ def main():
         logging.getLogger(__name__).info("加载检查点: %s", ckpt_file)
 
     # ── 评估模式 ──
+    cls_threshold = 0.0 if args.log_target else 1.0
+
     if args.eval_only:
-        val_loss, val_mae, pred, true = evaluate(model, val_loader, criterion, device)
-        logging.getLogger(__name__).info("\n验证集  Loss=%.4f  MAE=%.4f", val_loss, val_mae)
-        test_loss, test_mae, test_pred, test_true = evaluate(model, test_loader, criterion, device)
-        logging.getLogger(__name__).info("测试集  Loss=%.4f  MAE=%.4f", test_loss, test_mae)
-        for i in range(min(10, len(test_pred))):
-            logging.getLogger(__name__).info("  样本 %d: 真实=%.4f  预测=%.4f", i, test_true[i].item(), test_pred[i].item())
+        if args.task == "binary":
+            val_loss, val_f1, _, _, val_metrics = evaluate_binary(model, val_loader, criterion, device)
+            logging.getLogger(__name__).info(
+                "\n验证集  Loss=%.4f  F1=%.4f  Acc=%.4f  Prec=%.4f  Rec=%.4f",
+                val_loss, val_metrics["f1"], val_metrics["accuracy"],
+                val_metrics["precision"], val_metrics["recall"])
+            test_loss, test_f1, test_logits, test_true, test_metrics = evaluate_binary(
+                model, test_loader, criterion, device)
+            logging.getLogger(__name__).info(
+                "测试集  Loss=%.4f  F1=%.4f  Acc=%.4f  Prec=%.4f  Rec=%.4f",
+                test_loss, test_metrics["f1"], test_metrics["accuracy"],
+                test_metrics["precision"], test_metrics["recall"])
+            for i in range(min(10, len(test_logits))):
+                logging.getLogger(__name__).info(
+                    "  样本 %d: 真实=%.0f  logit=%.4f", i,
+                    test_true[i].item(), test_logits[i].item())
+        else:
+            val_loss, val_mae, val_pred, val_true = evaluate(model, val_loader, criterion, device)
+            val_metrics = binary_clf_metrics(val_pred, val_true, threshold=cls_threshold)
+            logging.getLogger(__name__).info(
+                "\n验证集  Loss=%.4f  MAE=%.4f  F1=%.4f  Acc=%.4f  Prec=%.4f  Rec=%.4f",
+                val_loss, val_mae, val_metrics["f1"], val_metrics["accuracy"],
+                val_metrics["precision"], val_metrics["recall"])
+            test_loss, test_mae, test_pred, test_true = evaluate(model, test_loader, criterion, device)
+            test_metrics = binary_clf_metrics(test_pred, test_true, threshold=cls_threshold)
+            logging.getLogger(__name__).info(
+                "测试集  Loss=%.4f  MAE=%.4f  F1=%.4f  Acc=%.4f  Prec=%.4f  Rec=%.4f",
+                test_loss, test_mae, test_metrics["f1"], test_metrics["accuracy"],
+                test_metrics["precision"], test_metrics["recall"])
+            for i in range(min(10, len(test_pred))):
+                logging.getLogger(__name__).info("  样本 %d: 真实=%.4f  预测=%.4f", i, test_true[i].item(), test_pred[i].item())
         return
 
     # ── 训练 ──
@@ -356,6 +400,7 @@ def main():
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     best_val_loss = float("inf")
+    best_val_f1 = -1.0
     patience_counter = 0
     best_epoch = 0
     best_model_state = None
@@ -380,31 +425,48 @@ def main():
         tensor_base=tensor_base,
         resolved_device_name=resolved_device_name,
     )
+    effective_training_config["task"] = args.task
 
     logging.getLogger(__name__).info("模型保存路径: %s", save_path)
     logging.getLogger(__name__).info("配置保存路径: %s", config_save_path)
+    if args.task == "binary":
+        logging.getLogger(__name__).info(
+            "\n开始训练 (%d epochs, BCE, patience=%d)...",
+            args.epochs, args.patience)
+    else:
+        logging.getLogger(__name__).info(
+            "\n开始训练 (%d epochs, Huber δ=%s, patience=%d)...",
+            args.epochs, args.huber_delta, args.patience)
     logging.getLogger(__name__).info(
-        "\n开始训练 (%d epochs, Huber δ=%s, patience=%d)...",
-        args.epochs, args.huber_delta, args.patience)
-    logging.getLogger(__name__).info(
-        "%-6s  %-11s  %-10s  %-9s  %-10s  %s",
-        'Epoch', 'Train Loss', 'Val Loss', 'Val MAE', 'LR', 'Status')
-    logging.getLogger(__name__).info("%s", '-' * 70)
+        "%-6s  %-11s  %-10s  %-9s  %-8s  %-10s  %s",
+        'Epoch', 'Train Loss', 'Val Loss', 'Val MAE', 'Val F1', 'LR', 'Status')
+    logging.getLogger(__name__).info("%s", '-' * 78)
 
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(
             model, train_loader, criterion, optimizer, device,
             max_grad_norm=args.grad_clip, noise_std=args.noise_std,
-            direction_lambda=args.direction_lambda,
+            direction_lambda=0.0 if args.task == "binary" else args.direction_lambda,
             log_target=args.log_target)
-        val_loss, val_mae, _, _ = evaluate(model, val_loader, criterion, device)
+        if args.task == "binary":
+            val_loss, val_f1, _, _, val_metrics = evaluate_binary(
+                model, val_loader, criterion, device)
+            val_mae = float("nan")
+        else:
+            val_loss, val_mae, val_pred, val_true = evaluate(model, val_loader, criterion, device)
+            val_metrics = binary_clf_metrics(val_pred, val_true, threshold=cls_threshold)
+            val_f1 = val_metrics["f1"]
         scheduler.step()
 
         lr = optimizer.param_groups[0]["lr"]
         status = ""
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        improved = (val_f1 > best_val_f1) if args.task == "binary" else (val_loss < best_val_loss)
+        if improved:
+            if args.task == "binary":
+                best_val_f1 = val_f1
+            else:
+                best_val_loss = val_loss
             patience_counter = 0
             best_epoch = epoch
             best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
@@ -412,7 +474,8 @@ def main():
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "val_loss": float(val_loss),
-                "val_mae": float(val_mae),
+                "val_mae": float(val_mae) if args.task != "binary" else None,
+                "task": args.task,
             }, save_path)
             # 将模型配置写入 configs/ 目录（与 checkpoint 分离）
             save_model_config(
@@ -429,8 +492,8 @@ def main():
 
         if epoch % 10 == 0 or epoch == 1 or status:
             logging.getLogger(__name__).info(
-                "%6d  %11.6f  %10.6f  %9.4f  %10.2e  %s",
-                epoch, train_loss, val_loss, val_mae, lr, status)
+                "%6d  %11.6f  %10.6f  %9.4f  %8.4f  %10.2e  %s",
+                epoch, train_loss, val_loss, val_mae, val_metrics["f1"], lr, status)
 
         # 早停检查
         if patience_counter >= args.patience:
@@ -441,24 +504,62 @@ def main():
     # ── 最终评估（在测试集上进行无偏评估）──
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
-    val_loss, val_mae, _, _ = evaluate(model, val_loader, criterion, device)
-    test_loss, test_mae, test_pred, test_true = evaluate(model, test_loader, criterion, device)
 
     logging.getLogger(__name__).info("%s", '=' * 60)
     logging.getLogger(__name__).info("最佳模型 (epoch %d)", best_epoch)
-    logging.getLogger(__name__).info("  Val  Loss = %.6f  MAE = %.4f  (模型选择依据)", val_loss, val_mae)
-    logging.getLogger(__name__).info("  Test Loss = %.6f  MAE = %.4f  (最终无偏评估)", test_loss, test_mae)
-    logging.getLogger(__name__).info("  模型保存: %s", save_path)
-    logging.getLogger(__name__).info("  配置保存: %s", config_save_path)
 
-    # 输出部分预测样本（来自测试集）
-    logging.getLogger(__name__).info("\n预测示例 (前 10 个测试样本):")
-    logging.getLogger(__name__).info("  %10s  %10s  %10s", '真实 Y', '预测 Ŷ', '误差')
-    for i in range(min(10, len(test_pred))):
-        err = test_pred[i].item() - test_true[i].item()
+    if args.task == "binary":
+        val_loss, _, _, _, val_metrics_final = evaluate_binary(model, val_loader, criterion, device)
+        test_loss, _, test_logits, test_true, test_metrics = evaluate_binary(
+            model, test_loader, criterion, device)
         logging.getLogger(__name__).info(
-            "  %10.4f  %10.4f  % +10.4f",
-            test_true[i].item(), test_pred[i].item(), err)
+            "  Val  Loss = %.6f  F1 = %.4f  (模型选择依据)",
+            val_loss, val_metrics_final["f1"])
+        logging.getLogger(__name__).info(
+            "  Test Loss = %.6f  F1 = %.4f  (最终无偏评估)",
+            test_loss, test_metrics["f1"])
+        logging.getLogger(__name__).info(
+            "  Test  Acc = %.4f  Precision = %.4f  Recall = %.4f",
+            test_metrics["accuracy"], test_metrics["precision"], test_metrics["recall"])
+        logging.getLogger(__name__).info(
+            "  Test  TP=%d  FP=%d  TN=%d  FN=%d",
+            test_metrics["tp"], test_metrics["fp"],
+            test_metrics["tn"], test_metrics["fn"])
+        logging.getLogger(__name__).info("  模型保存: %s", save_path)
+        logging.getLogger(__name__).info("  配置保存: %s", config_save_path)
+        logging.getLogger(__name__).info("\n预测示例 (前 10 个测试样本):")
+        logging.getLogger(__name__).info("  %10s  %10s", '真实标签', '预测 logit')
+        for i in range(min(10, len(test_logits))):
+            logging.getLogger(__name__).info(
+                "  %10.0f  %10.4f",
+                test_true[i].item(), test_logits[i].item())
+    else:
+        val_loss, val_mae, val_pred_final, val_true_final = evaluate(model, val_loader, criterion, device)
+        val_metrics_final = binary_clf_metrics(val_pred_final, val_true_final, threshold=cls_threshold)
+        test_loss, test_mae, test_pred, test_true = evaluate(model, test_loader, criterion, device)
+        test_metrics = binary_clf_metrics(test_pred, test_true, threshold=cls_threshold)
+        logging.getLogger(__name__).info(
+            "  Val  Loss = %.6f  MAE = %.4f  F1 = %.4f  (模型选择依据)",
+            val_loss, val_mae, val_metrics_final["f1"])
+        logging.getLogger(__name__).info(
+            "  Test Loss = %.6f  MAE = %.4f  F1 = %.4f  (最终无偏评估)",
+            test_loss, test_mae, test_metrics["f1"])
+        logging.getLogger(__name__).info(
+            "  Test  Acc = %.4f  Precision = %.4f  Recall = %.4f",
+            test_metrics["accuracy"], test_metrics["precision"], test_metrics["recall"])
+        logging.getLogger(__name__).info(
+            "  Test  TP=%d  FP=%d  TN=%d  FN=%d  (threshold=%.1f)",
+            test_metrics["tp"], test_metrics["fp"],
+            test_metrics["tn"], test_metrics["fn"], cls_threshold)
+        logging.getLogger(__name__).info("  模型保存: %s", save_path)
+        logging.getLogger(__name__).info("  配置保存: %s", config_save_path)
+        logging.getLogger(__name__).info("\n预测示例 (前 10 个测试样本):")
+        logging.getLogger(__name__).info("  %10s  %10s  %10s", '真实 Y', '预测 Ŷ', '误差')
+        for i in range(min(10, len(test_pred))):
+            err = test_pred[i].item() - test_true[i].item()
+            logging.getLogger(__name__).info(
+                "  %10.4f  %10.4f  % +10.4f",
+                test_true[i].item(), test_pred[i].item(), err)
 
 
 if __name__ == "__main__":
